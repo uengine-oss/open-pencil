@@ -2,7 +2,7 @@ export const FIG_KIWI_DEFAULT_VERSION = 101
 
 import { deflateSync, inflateSync } from 'fflate'
 
-import { getLoadedFontData, normalizeFontFamily, weightToStyle } from '../text/fonts'
+import { getLoadedFontData, normalizeFontFamily, mapFontForFigma, weightToStyle } from '../text/fonts'
 import { getGlyphOutlineCommandsSync } from '../text/opentype'
 import { encodeVectorNetworkBlob, buildStyleOverrideTable } from '../vector'
 import { stringToGuid, VARIABLE_BINDING_FIELDS } from './convert'
@@ -185,12 +185,12 @@ function buildDerivedTextData(
 
   const addFont = (family: string, weight: number, italic: boolean) => {
     const style = weightToStyle(weight, italic)
-    const normalized = normalizeFontFamily(family)
-    const key = `${normalized}|${style}`
+    const mapped = mapFontForFigma(family)
+    const key = `${mapped}|${style}`
     if (seen.has(key)) return
     seen.add(key)
     fontMeta.push({
-      key: { family: normalized, style, postscript: '' },
+      key: { family: mapped, style, postscript: '' },
       fontLineHeight: 1.2,
       fontDigest: digestMap.get(key),
       fontStyle: italic ? 'ITALIC' : 'NORMAL',
@@ -276,7 +276,7 @@ function exportTextData(node: SceneNode): NodeChange['textData'] {
     const weight = style.fontWeight ?? node.fontWeight
     const italic = style.italic ?? node.italic
     override.fontName = {
-      family: normalizeFontFamily(style.fontFamily ?? node.fontFamily),
+      family: mapFontForFigma(style.fontFamily ?? node.fontFamily),
       style: weightToStyle(weight, italic),
       postscript: ''
     }
@@ -302,16 +302,22 @@ function exportTextData(node: SceneNode): NodeChange['textData'] {
   }
 }
 
-export function safeColor(c: { r: number; g: number; b: number; a?: number }): Color {
-  return { r: c.r, g: c.g, b: c.b, a: c.a ?? 1 }
+export function safeColor(c: { r: number; g: number; b: number; a?: number } | null | undefined): Color {
+  if (!c) return { r: 0, g: 0, b: 0, a: 1 }
+  return {
+    r: typeof c.r === 'number' ? c.r : 0,
+    g: typeof c.g === 'number' ? c.g : 0,
+    b: typeof c.b === 'number' ? c.b : 0,
+    a: typeof c.a === 'number' ? c.a : 1,
+  }
 }
 
 function fillToKiwiPaint(f: SceneNode['fills'][number]): Paint {
   const paint: Paint = {
     type: f.type,
     color: safeColor(f.color),
-    opacity: f.opacity,
-    visible: f.visible,
+    opacity: typeof f.opacity === 'number' ? f.opacity : 1,
+    visible: f.visible !== false,
     blendMode: f.blendMode ?? 'NORMAL'
   }
   if (f.gradientStops) {
@@ -369,7 +375,7 @@ function serializeTextProps(
   upsertPluginData(node, TEXT_DIRECTION_PLUGIN_KEY, node.textDirection)
   nc.fontSize = node.fontSize
   nc.fontName = {
-    family: normalizeFontFamily(node.fontFamily),
+    family: mapFontForFigma(node.fontFamily),
     style: weightToStyle(node.fontWeight, node.italic),
     postscript: ''
   }
@@ -378,7 +384,14 @@ function serializeTextProps(
   if (autoResize !== 'NONE') nc.textAutoResize = autoResize
   nc.textAlignHorizontal = node.textAlignHorizontal
   nc.textUserLayoutVersion = 4
-  if (fontDigestMap) nc.derivedTextData = buildDerivedTextData(node, fontDigestMap)
+  // Only emit derivedTextData when glyph outlines are available.
+  // Empty glyphs array causes Figma to render blank text.
+  if (fontDigestMap) {
+    const derived = buildDerivedTextData(node, fontDigestMap)
+    if (derived.glyphs && derived.glyphs.length > 0) {
+      nc.derivedTextData = derived
+    }
+  }
   // Figma needs explicit lineHeight to compute text bounding boxes.
   // Without it (and without baselines/glyphs data), text gets 0 height.
   const lh = node.lineHeight != null ? node.lineHeight : Math.ceil(node.fontSize * 1.2)

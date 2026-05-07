@@ -24,7 +24,12 @@ export function useColorVariableBinding(kind: ColorBindingKind) {
   function getBoundVariable(nodeId: string, index: number): Variable | undefined {
     const n = store.getNode(nodeId)
     if (!n) return undefined
-    const varId = n.boundVariables[bindingPath(index)]
+    // Tolerate nodes without `boundVariables` (non-canonical sceneGraphs from
+    // backend converters that pre-date the field). Returning undefined here
+    // is the same as "no binding", which is correct for these nodes.
+    const bv = (n as any).boundVariables
+    if (!bv) return undefined
+    const varId = bv[bindingPath(index)]
     return varId ? store.getVariable(varId) : undefined
   }
 

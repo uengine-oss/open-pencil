@@ -23,6 +23,17 @@ let fontProvider: TypefaceFontProvider | null = null
 
 export function initFontService(_canvasKit: CanvasKit, provider: TypefaceFontProvider) {
   fontProvider = provider
+  // Re-register all previously loaded fonts into the new provider.
+  // When a FrameEditor is re-created, it makes a fresh fontProvider,
+  // but CJK/Arabic fallback fonts were already fetched and cached in
+  // loadedFamilies. Without re-registering, Korean/Chinese/Japanese
+  // text will render as tofu (□□□).
+  for (const [key, buffer] of loadedFamilies) {
+    const family = key.split('|')[0]
+    try {
+      provider.registerFont(buffer, family)
+    } catch { /* ignore if already registered or invalid */ }
+  }
 }
 
 export function getFontProvider(): TypefaceFontProvider | null {
@@ -65,8 +76,44 @@ const BUNDLED_FONTS: Record<string, string> = {
 const googleFontsCache = new Map<string, Record<string, string>>()
 const googleFontsFailed = new Set<string>()
 
+/**
+ * Font family mapping for Figma compatibility.
+ * Maps fonts not available in Figma to universally available alternatives.
+ * Users can extend this via `setFigmaFontMap()`.
+ */
+const FIGMA_FONT_MAP: Record<string, string> = {
+  'Pretendard': 'Inter',
+  'Pretendard Variable': 'Inter',
+  'T Universe Sans TTF': 'Inter',
+  'T Universe Sans variable': 'Inter',
+  'T Sans Beta': 'Inter',
+  'Apple SD Gothic Neo': 'Noto Sans KR',
+  'NanumSquare': 'Noto Sans KR',
+}
+
+let figmaFontMapEnabled = true
+
+/** Enable/disable Figma font mapping for export. */
+export function setFigmaFontMapEnabled(enabled: boolean): void {
+  figmaFontMapEnabled = enabled
+}
+
+/** Add custom font mappings. */
+export function setFigmaFontMap(map: Record<string, string>): void {
+  Object.assign(FIGMA_FONT_MAP, map)
+}
+
 export function normalizeFontFamily(family: string): string {
   return family.replace(/\s+(Variable|\d+(?:pt|px|em))$/i, '')
+}
+
+/** Map a font family to its Figma-compatible alternative (for export only). */
+export function mapFontForFigma(family: string): string {
+  const base = normalizeFontFamily(family)
+  if (figmaFontMapEnabled && FIGMA_FONT_MAP[base]) {
+    return FIGMA_FONT_MAP[base]
+  }
+  return base
 }
 
 async function retryWithNormalizedFamily(family: string): Promise<Record<string, string> | null> {

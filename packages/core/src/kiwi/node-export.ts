@@ -1,4 +1,5 @@
 import { mergePluginData, serializePluginRelaunchData } from './plugin-data'
+import { stringToGuid } from './convert'
 
 import type { SceneGraph, SceneNode } from '../scene-graph'
 import type { Color, GUID, Matrix } from '../types'
@@ -109,9 +110,10 @@ export function sceneNodeToKiwiWithContext(
   localIdCounter: { value: number },
   context: SceneNodeToKiwiContext
 ): KiwiNodeChange[] {
-  const localID = localIdCounter.value++
-  const guid = { sessionID: 1, localID }
-  context.nodeIdToGuid?.set(node.id, guid)
+  // Re-use pre-registered GUID for components, or allocate a new one
+  const preRegistered = context.nodeIdToGuid?.get(node.id)
+  const guid = preRegistered ?? { sessionID: 1, localID: localIdCounter.value++ }
+  if (!preRegistered) context.nodeIdToGuid?.set(node.id, guid)
 
   const strokePaints = createStrokePaints(context, node)
 
@@ -127,6 +129,15 @@ export function sceneNodeToKiwiWithContext(
     transform: context.computeExportTransform(node, context.graph),
     strokeWeight: node.strokes[0]?.weight ?? DEFAULT_STROKE_WEIGHT,
     strokeAlign: node.strokes[0]?.align ?? 'INSIDE'
+  }
+
+  // Serialize component/instance linkage (symbolData)
+  if (node.componentId && (node.type === 'INSTANCE' || node.componentId)) {
+    // Try to resolve the component's GUID from the export map first
+    const compGuid = context.nodeIdToGuid?.get(node.componentId)
+    nc.symbolData = {
+      symbolID: compGuid ?? stringToGuid(node.componentId)
+    }
   }
 
   applyNodeVisualProps(context, node, nc)

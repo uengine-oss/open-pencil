@@ -93,6 +93,16 @@ export async function exportFigFile(
   const fontDigestMap = await buildFontDigestMap(graph)
   let internalCanvasGuid: GUID | null = null
 
+  // Pre-register GUIDs for all COMPONENT nodes so that INSTANCE symbolData
+  // can reference them regardless of serialization order.
+  for (const node of graph.getAllNodes()) {
+    if (node.type === 'COMPONENT' || node.type === 'COMPONENT_SET') {
+      if (!nodeIdToGuid.has(node.id)) {
+        nodeIdToGuid.set(node.id, { sessionID: 1, localID: localIdCounter.value++ })
+      }
+    }
+  }
+
   for (let p = 0; p < pages.length; p++) {
     const page = pages[p]
     const canvasLocalID = localIdCounter.value++
@@ -108,7 +118,13 @@ export async function exportFigFile(
     if (page.internalOnly) canvasNc.internalOnly = true
     nodeChanges.push(canvasNc)
 
-    const children = graph.getChildren(page.id)
+    // Export COMPONENTs before other nodes so their GUIDs are available
+    // when INSTANCE nodes reference them via symbolData.
+    const children = graph.getChildren(page.id).sort((a, b) => {
+      const aIsComp = a.type === 'COMPONENT' || a.type === 'COMPONENT_SET' ? 0 : 1
+      const bIsComp = b.type === 'COMPONENT' || b.type === 'COMPONENT_SET' ? 0 : 1
+      return aIsComp - bIsComp
+    })
     for (let i = 0; i < children.length; i++) {
       nodeChanges.push(
         ...sceneNodeToKiwi(

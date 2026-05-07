@@ -224,9 +224,16 @@ export function clearNodeStrokeOkHCL(node: SceneNode, index: number): Partial<Sc
 }
 
 export function getNodeOkHCLPayloads(node: SceneNode): OkHCLPayload[] {
-  return node.pluginData
-    .filter((entry) => entry.pluginId === 'open-pencil' && entry.key === OKHCL_PLUGIN_KEY)
-    .map((entry) => parseOkHCLPayload(entry.value))
+  // Tolerate sceneGraphs that omit `pluginData` (e.g. nodes synthesized by
+  // older backend converters or hand-written by tests). Without this guard,
+  // the very first paint of a non-canonical scene throws
+  // "Cannot read properties of undefined (reading 'filter')" and the
+  // FrameEditor never renders.
+  const pluginData = (node as any).pluginData
+  if (!Array.isArray(pluginData)) return []
+  return pluginData
+    .filter((entry: any) => entry && entry.pluginId === 'open-pencil' && entry.key === OKHCL_PLUGIN_KEY)
+    .map((entry: any) => parseOkHCLPayload(entry.value))
     .filter((payload): payload is OkHCLPayload => payload !== null)
 }
 

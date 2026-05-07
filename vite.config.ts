@@ -94,11 +94,18 @@ export default defineConfig(async ({ command }) => ({
       }
     })
   ],
+  build: {
+    target: 'esnext'
+  },
   clearScreen: false,
   server: {
     port: 1420,
     strictPort: true,
     host: host || false,
+    cors: {
+      origin: ['http://localhost:5173'],
+      methods: ['GET']
+    },
     hmr: host
       ? {
           protocol: 'ws',

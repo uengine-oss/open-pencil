@@ -744,6 +744,7 @@ export class SkiaRenderer {
     viewportHeight: number,
     showRulers = true
   ): void {
+    if (this.destroyed) return
     const extendedState = state as EditorState & {
       nodeEditState?: RenderOverlays['nodeEditState']
     }
@@ -973,7 +974,12 @@ export class SkiaRenderer {
     node: SceneNode,
     graph: SceneGraph
   ): ResolvedRenderColor {
-    const varId = node.boundVariables[`fills/${fillIndex}/color`]
+    // Tolerate sceneGraphs that omit `boundVariables` entirely (e.g.
+    // pulled-from-Figma trees converted via plugin export, where the
+    // backend converter did not yet add this field). Without this guard,
+    // the renderer crashes with "Cannot read properties of undefined
+    // (reading 'fills/0/color')" mid-paint and the FrameEditor goes blank.
+    const varId = node.boundVariables?.[`fills/${fillIndex}/color`]
     if (varId) {
       const resolved = graph.resolveColorVariable(varId)
       if (resolved) {
@@ -1056,11 +1062,15 @@ export class SkiaRenderer {
     this.auxFill.delete()
     this.auxStroke.delete()
     this.opacityPaint.delete()
-    this.textFont?.delete()
-    this.labelFont?.delete()
-    this.sizeFont?.delete()
-    this.fontMgr?.delete()
-    this.fontProvider?.delete()
+    // NOTE: Font objects, fontMgr, and fontProvider are NOT deleted here.
+    // They share typefaces with the module-level font cache in text/fonts.ts.
+    // Deleting them corrupts the shared typeface and crashes subsequent renderers
+    // with "Font instance already deleted" or "TypefaceProvider" errors.
+    this.textFont = null
+    this.labelFont = null
+    this.sizeFont = null
+    this.fontMgr = null
+    this.fontProvider = null
     this.rulerBgPaint.delete()
     this.rulerTickPaint.delete()
     this.rulerTextPaint.delete()
