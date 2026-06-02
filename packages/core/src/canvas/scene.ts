@@ -565,7 +565,16 @@ export function renderText(r: SkiaRenderer, canvas: Canvas, node: SceneNode): vo
   if (!text) return
 
   canvas.save()
-  canvas.clipRect(r.ck.LTRBRect(0, 0, node.width, node.height), r.ck.ClipOp.Intersect, false)
+  // Clip only fixed axes. An auto-resizing axis must never clip: an ingested
+  // box (e.g. from Figma) can be slightly narrower/shorter than our font
+  // metrics produce, cutting off trailing glyphs. buildParagraph grows the
+  // WIDTH_AND_HEIGHT layout, so clipping to the stale node box is what
+  // truncates it. NONE/TRUNCATE keep a hard box (TRUNCATE adds an ellipsis).
+  const autoW = node.textAutoResize === 'WIDTH_AND_HEIGHT'
+  const autoH = autoW || node.textAutoResize === 'HEIGHT'
+  const clipW = autoW ? 1e6 : node.width
+  const clipH = autoH ? 1e6 : node.height
+  canvas.clipRect(r.ck.LTRBRect(0, 0, clipW, clipH), r.ck.ClipOp.Intersect, false)
 
   if (node.textPicture) {
     const pic = r.ck.MakePicture(node.textPicture)

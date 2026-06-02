@@ -66,10 +66,16 @@ export function buildTextPicture(r: TextRenderer, node: SceneNode): Uint8Array |
 
   const ck = r.ck
   const recorder = new ck.PictureRecorder()
-  const bounds = ck.LTRBRect(0, 0, node.width || 1e6, node.height || 1e6)
+  const paragraph = buildParagraph(r, node)
+  // Size the recording cull rect to the laid-out paragraph, not the (possibly
+  // stale) node box — an auto-resized paragraph can exceed node.width/height
+  // when ingested font metrics differ. The render-time clip in renderText()
+  // still enforces fixed-box truncation where textAutoResize requires it.
+  const cullW = Math.max(node.width || 0, Math.ceil(paragraph.getLongestLine())) || 1e6
+  const cullH = Math.max(node.height || 0, Math.ceil(paragraph.getHeight())) || 1e6
+  const bounds = ck.LTRBRect(0, 0, cullW, cullH)
   const recCanvas = recorder.beginRecording(bounds)
 
-  const paragraph = buildParagraph(r, node)
   recCanvas.drawParagraph(paragraph, 0, 0)
   paragraph.delete()
 

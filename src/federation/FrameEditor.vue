@@ -31,31 +31,56 @@ const emit = defineEmits<{
   save: [data: SerializedSceneGraph]
 }>()
 
-// Create editor store synchronously in setup() — required for provideEditor/inject chain
-const initialGraph = props.sceneData ? deserializeSceneGraph(props.sceneData) : new SceneGraph()
-// Fix orphaned frames: AI may set parentId to "currentPage" or place frames as root children
-fixOrphanedFrames(initialGraph)
-// Compute auto-layouts so frames have correct height (Hug children)
-// Wrapped in try-catch: component-based wireframes may have incomplete layout data
-const pages = initialGraph.getPages()
-if (pages.length > 0) {
-  try {
-    computeAllLayouts(initialGraph, pages[0].id)
-  } catch (e) {
-    console.warn('[FrameEditor] computeAllLayouts failed (non-fatal):', e)
+// Build a fully-prepared editor store from serialized scene data. Used by both
+// setup() and watch(sceneData) so an in-place refresh after Save & Sync runs the
+// SAME pipeline as the initial mount — previously the watch skipped
+// fixOrphanedFrames + computeAllLayouts, so a saved frame rebuilt without
+// auto-layout looked "reverted/broken" until a tab switch forced a full remount.
+function buildStore(sceneData: SerializedSceneGraph | null): EditorStore {
+  const graph = sceneData ? deserializeSceneGraph(sceneData) : new SceneGraph()
+  // Fix orphaned frames: AI may set parentId to "currentPage" or place frames as root children
+  fixOrphanedFrames(graph)
+  // Compute auto-layouts so frames have correct height (Hug children).
+  // Wrapped in try-catch: component-based wireframes may have incomplete layout data.
+  const pages = graph.getPages()
+  if (pages.length > 0) {
+    try {
+      computeAllLayouts(graph, pages[0].id)
+    } catch (e) {
+      console.warn('[FrameEditor] computeAllLayouts failed (non-fatal):', e)
+    }
   }
+  return createEditorStore(graph)
 }
-const editorStore = createEditorStore(initialGraph)
+
+// Create editor store synchronously in setup() — required for provideEditor/inject chain
+const editorStore = buildStore(props.sceneData)
 setActiveEditorStore(editorStore)
-provideEditor(editorStore as any)
 
 const store = ref<EditorStore>(editorStore)
 const initialized = ref(!!props.sceneData)
 
+// Provide a STABLE proxy that always forwards to the current `store.value`.
+// watch(sceneData) swaps store.value for a freshly-deserialized store after
+// Save & Sync; with this proxy, useEditor() consumers (Toolbar, PropertiesPanel,
+// and the headless canvas/text primitives) resolve to the NEW store
+// automatically instead of holding the one injected at setup() time. That
+// stale inject is why the host previously had to remount the whole editor
+// (visible flash) on every save. Mirrors the global storeProxy in stores/editor.
+const editorProxy = new Proxy({} as EditorStore, {
+  get(_t, prop) {
+    return Reflect.get(store.value as unknown as object, prop)
+  },
+  set(_t, prop, value) {
+    return Reflect.set(store.value as unknown as object, prop, value)
+  }
+})
+provideEditor(editorProxy as any)
+
 // Show properties panel when a node is selected (double-click)
 const hasSelection = computed(() => {
-  void editorStore.state.sceneVersion // reactivity trigger
-  return editorStore.state.selectedIds.size > 0
+  void store.value.state.sceneVersion // reactivity trigger
+  return store.value.state.selectedIds.size > 0
 })
 
 // Navigate to the target frame's page and select it
@@ -171,12 +196,34 @@ function handleSave() {
 
 watch(() => props.sceneData, (newData) => {
   if (unmounted || !newData) return
-  const graph = deserializeSceneGraph(newData)
-  const newStore = createEditorStore(graph)
+  const prev = store.value
+  // Same full pipeline as setup() (fixOrphanedFrames + computeAllLayouts) so an
+  // in-place refresh renders identically to a remount.
+  const newStore = buildStore(newData)
+  // Preserve the user's current viewport. Rebuilding the store would otherwise
+  // snap zoom/pan back to default on every save (round-trip echo) — a jarring
+  // regression once we stopped remounting.
+  newStore.state.zoom = prev.state.zoom
+  newStore.state.panX = prev.state.panX
+  newStore.state.panY = prev.state.panY
+  // Continue the version counters from the previous store instead of letting the
+  // fresh store restart them at 0. The canvas renderer caches its scene picture
+  // keyed by sceneVersion (SkiaRenderer.scenePictureVersion); a reset counter
+  // can collide with that cached version, so the renderer redraws the STALE
+  // picture until some later graph mutation bumps the version — the "reverts
+  // after save until I nudge a node" symptom. Carrying forward + 1 guarantees a
+  // strictly-newer version → cache invalidation → the saved content draws now.
+  newStore.state.sceneVersion = prev.state.sceneVersion + 1
+  newStore.state.renderVersion = prev.state.renderVersion + 1
   setActiveEditorStore(newStore)
   store.value = newStore
   initialized.value = true
   if (props.frameId) navigateToFrame(newStore, props.frameId)
+  // The canvas/headless primitives reach the store through stable proxies
+  // (storeProxy / editorProxy) so they now resolve to newStore in place — no
+  // remount. Nudge a repaint so the freshly-deserialized graph is drawn
+  // immediately rather than waiting for the next reactive tick.
+  newStore.requestRepaint()
 })
 </script>
 
