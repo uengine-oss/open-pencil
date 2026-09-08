@@ -280,6 +280,10 @@ watch(() => props.sceneData, (newData) => {
   flex-direction: column;
   width: 100%;
   height: 100%;
+  /* 아래 @container 가 기준으로 삼는 상자. 뷰포트가 아니라 **이 편집기가
+     실제로 받은 폭**을 봐야 한다 — 인스펙터 안에 끼워 넣으면 화면은 넓어도
+     편집기는 좁다. */
+  container-type: inline-size;
   background: var(--color-canvas);
   color: var(--color-surface);
   font-family: Inter, system-ui, -apple-system, sans-serif;
@@ -344,6 +348,25 @@ watch(() => props.sceneData, (newData) => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* flex 항목의 기본 min-width 는 auto 라, 옆의 고정폭 패널에 밀려 0 까지
+     찌그러진다. 캔버스는 그리는 자리다 — 먼저 자리를 잡는다. */
+  min-width: 0;
+}
+
+/* 인스펙터 안에서는 본문이 400px 도 안 된다. 속성 패널이 260px 를 고정으로
+   가져가면 캔버스에 65px 만 남아 **선택하는 순간 그릴 수 없게 된다**
+   (속성 패널은 선택했을 때만 뜬다 — 하필 캔버스가 가장 필요한 때다).
+   좁으면 옆이 아니라 아래로 내린다. */
+@container (max-width: 560px) {
+  .frame-editor__body {
+    flex-direction: column;
+  }
+  .frame-editor__properties {
+    width: 100%;
+    max-height: 45%;
+    border-left: none;
+    border-top: 1px solid var(--color-border, #333);
+  }
 }
 
 .frame-editor__properties {
