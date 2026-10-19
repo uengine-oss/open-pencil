@@ -25,7 +25,22 @@ COPY packages/core/package.json   packages/core/
 COPY packages/docs/package.json   packages/docs/
 COPY packages/mcp/package.json    packages/mcp/
 COPY packages/vue/package.json    packages/vue/
-RUN bun install --frozen-lockfile --production
+# 취약점 보정 ⑦ (2026-10-19) — **쓰지 않는 워크스페이스를 안 깐다.**
+#
+# `--production` 만으로는 뿌리의 devDependency 만 빠진다. 워크스페이스라
+# `packages/*` **전부**의 의존이 설치되고, 뿌리의 의존 45개(Tauri·Vue UI·AI SDK·
+# canvaskit·yjs·trystero…)도 같이 들어온다. 그래서 운영 이미지에 `vite`·`hono`·
+# `ws`(뿌리 devDependency) 와 `@grpc/grpc-js`·`protobufjs`(@ai-sdk/google 경유)·
+# `@libp2p/peer-store`(trystero 경유)가 실려 있었다 — 치명·고위험 **40건**.
+#
+# 이 서비스가 쓰는 것은 아래 COPY 가 말하는 그대로 **cli(진입점) · core(렌더러)**
+# 뿐이다. 설치도 거기에 맞춘다. 소스 범위와 설치 범위가 어긋나 있던 것을 맞추는 것이지
+# 기능을 줄이는 것이 아니다.
+#
+# ⚠ manifest 는 **다섯 개를 다 COPY 한 채로 둔다** — 워크스페이스 링크를 풀 때
+#   bun 이 참조한다. 지우면 `--frozen-lockfile` 이 잠금과 안 맞다고 문다.
+RUN bun install --frozen-lockfile --production \
+      --filter='@open-pencil/cli' --filter='@open-pencil/core'
 
 # 서비스가 실제로 쓰는 것만 담는다: cli(진입점·headless) · core(렌더러) ·
 # 컴포넌트 라이브러리.
